@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# memo - Easy and fun management of your memos and notes
+# 2017 (c) Created by Rafael Bodill http://github.com/rafi
+# Credits: Inspiration from https://github.com/mattn/memo
+#
+# Requirements:
+# - `tree`, or change $MEMO_TREE
+# - `the-silver-searcher`, or change $MEMO_GREP
+# - $EDITOR set to your favorite editor
+#
+# Usage:
+#   Run `memo` for available commands.
+#
+# Configuration via environment-variables:
+# - EDITOR = Preferred user editor
+# - MEMO_DIR = Base directory for all your memos, default: `~/.local/share/memo`
+# - MEMO_FMT = Format for new memos, default: `%Y-%m/%d-{SLUG\}.md`
+# - MEMO_GREP = Command to use for grep, default: `ag` (the silver searcher)
+# - MEMO_TREE = Command to use for list, default: `tree -FR --dirsfirst`
+# - MEMO_SELECT = Command to use for selecting a single memo, default: fzf
+
+set -eu
+__memo_version="0.8.0"
+
+function _memo_usage() {
+	echo 'NAME:'
+	echo "   memo v${__memo_version} - Manage your memos and notes easily."
+	echo
+	echo 'USAGE:'
+	echo "   $(basename $0) [global options] <command> [command options]"
+	echo
+	echo 'COMMANDS:'
+	echo '     new, n     create memo'
+	echo '     list, l    list memo'
+	echo '     edit, e    edit memo'
+	echo '     delete, d  delete memo'
+	echo '     grep, g    grep memo'
+	echo '     config, c  configure'
+	echo '     serve, s   serve memos over http'
+	echo '     help, h    list of commands'
+	echo
+	echo 'GLOBAL OPTIONS:'
+	echo '   --help, -h      show help'
+	echo '   --disable-yaml  disable yaml matter'
+	echo '   --version, -v   print the version'
+}
+
+function _memo_create() {
+	local __title="$1"
+	local __slug="${__title//\ /-}"
+	local __slug="${__slug,,}"
+	local __memo="$(date +"${__memofmt}")"
+	local __memo="${__memo//\{SLUG\}/$__slug}"
+	local __path="$(dirname "$__memo")"
+
+	[ -d "$__path" ] || mkdir -p "$__path"
+
+	if [ "$__disable_yaml" == "1" ]; then
+		echo "# ${__title}" >> "${__memodir}/${__memo}"
+	else
+		cat <<EOF >> "${__memodir}/${__memo}"
+---
+title: ${__title}
+date: $(date +'%Y-%m-%d')
+updated:
+description:
+categories:
+tags:
+---
+# ${__title}
+EOF
+	fi
+	echo "${__memodir}/${__memo}"
+}
+
+function _memo_open_browser() {
+	local port="$1"
+	if [ -n "$BROWSER" ]; then
+		"$BROWSER" "http://localhost:$port"
+	else
+		open "http://localhost:$port"
+	fi
+}
+
+function _memo_select() {
+	pushd "${__memodir}" 1>/dev/null
+	if [ "${__memoselect}" = "peco" ]; then
+		echo "$(find . -not -path '*/\.*' -type f \
+			| sed 's/^\.\///g' | "${MEMO_SELECT}")"
+	else
+		"${__memoselect}"
+	fi
+	popd 1>/dev/null
+}
+
+function _memo() {
+	# Defaults
+	local __memodir="${MEMO_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/memo}"
+	local __memofmt="${MEMO_FMT:-%Y-%m/%d-{SLUG\}.md}"
+	local __memogrep="${MEMO_GREP:-ag}"
+	local __memotree="${MEMO_TREE:-tree -FR --dirsfirst}"
+	local __memoselect="${MEMO_SELECT:-fzf}"
+	local __memoeditor="${EDITOR:-vim}"
+	local __disable_yaml=0
+
+	for arg in "$@"; do
+		case "$arg" in
+			# Show help or version.
+			h|help|--help|-h) _memo_usage; shift;;
+			v|version|--version|-v) echo "memo v${__memo_version}"; shift;;
+
+			# When creating new memos, do not include YAML matter.
+			--disable-yaml) __disable_yaml=1; shift;;
+
+			# Create a new memo file formatted with user's input title.
+			# Open preferred editor immediately after input.
+			n|new)
+					read -p "Title: " __title
+					[ -z "$__title" ] || ${__memoeditor} "$(_memo_create "${__title}")"
+					exit $?;;
+
+			# List memos with preferred tool.
+			l|list) ${__memotree} "${__memodir}"; shift;;
+
+			# Edit a memo: Select memo with preferred tool, abort if empty.
+			e|edit) __memo="$(_memo_select)"
+				[ -z "$__memo" ] || ${__memoeditor} "${__memodir}/${__memo}"
+				exit $?;;
+
+			# Delete a memo: Select memo with preferred tool, abort if empty.
+			d|delete) __memo="$(_memo_select)"
+				[ -z "$__memo" ] || rm -i "${__memodir}/${__memo}"
+				exit $?;;
+
+			# Grep memos: Search throughout all memos for a pattern.
+			g|grep) shift;
+				[ -n "${@:-}" ] || exit 1
+				${__memogrep} "$@" "${__memodir}"
+				exit $?;;
+
+			# Display configuration.
+			c|config)
+					echo "Config:"
+					echo "   MEMO_DIR: ${__memodir}"
+					echo "   MEMO_FMT: ${__memofmt}"
+					echo "   MEMO_GREP: ${__memogrep}"
+					echo "   MEMO_TREE: ${__memotree}"
+					echo "   MEMO_SELECT: ${__memoselect}"
+					shift;;
+
+			# Serve memos: Depending on available software, serve the
+			#              whole memo directory or a selected single one.
+			s|serve)
+					if hash allmark 2>/dev/null; then
+						allmark serve -livereload "${__memodir}"
+						_memo_open_browser 33001
+					elif hash grip 2>/dev/null; then
+						__memo="$(_memo_select)"
+						[ -z "$__memo" ] || grip -b "${__memo}"
+					elif hash harp 2>/dev/null; then
+						harp server "${__memodir}"
+						_memo_open_browser 9000
+					elif hash markdownserver 2>/dev/null; then
+						markdownserver
+						_memo_open_browser 8009
+					elif hash markserv 2>/dev/null; then
+						markserv -h "${__memodir}"
+						_memo_open_browser 8080
+					elif hash vmd 2>/dev/null; then
+						__memo="$(_memo_select)"
+						[ -z "$__memo" ] || vmd "${__memo}"
+					else
+						echo 'Unable to find Markdown server, consider:'
+						echo
+						echo 'allmark - https://github.com/andreaskoch/allmark'
+						echo 'caddy - https://github.com/mholt/caddy'
+						echo 'grip - https://github.com/joeyespo/grip'
+						echo 'harp - https://github.com/sintaxi/harp'
+						echo 'markdown-server - https://github.com/ohbarye/markdown-server'
+						echo 'markserv - https://github.com/F1LT3R/markserv'
+						echo 'vmd - https://github.com/yoshuawuyts/vmd'
+						exit 2
+					fi
+					exit $?;;
+
+			*) echo "Warning, unrecognized option '$1'."; shift;;
+		esac
+	done
+}
+
+[ $# -eq 0 ] && _memo_usage || _memo "$@"
+
+# vim: set ft=sh ts=2 sw=2 tw=80 noet :
