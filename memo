@@ -27,7 +27,7 @@ function _memo_usage() {
 	echo "   memo v${__memo_version} - Manage your memos and notes easily."
 	echo
 	echo 'USAGE:'
-	echo "   $(basename $0) [global options] <command> [command options]"
+	echo "   $(basename "$0") [global options] <command> [command options]"
 	echo
 	echo 'COMMANDS:'
 	echo '     new, n     create memo'
@@ -49,9 +49,9 @@ function _memo_create() {
 	local __title="$1"
 	local __slug="${__title//\ /-}"
 	local __slug="${__slug,,}"
-	local __memo="$(date +"${__memofmt}")"
+	local __memo; __memo="$(date +"${__memofmt}")"
 	local __memo="${__memo//\{SLUG\}/$__slug}"
-	local __path="$(dirname "$__memo")"
+	local __path; __path="$(dirname "$__memo")"
 
 	[ -d "$__path" ] || mkdir -p "$__path"
 
@@ -188,6 +188,6 @@ function _memo() {
 	done
 }
 
-[ $# -eq 0 ] && _memo_usage || _memo "$@"
+([ $# -eq 0 ] && _memo_usage) || _memo "$@"
 
 # vim: set ft=sh ts=2 sw=2 tw=80 noet :

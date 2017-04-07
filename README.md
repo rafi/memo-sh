@@ -69,6 +69,7 @@ by Yasuhiro Matsumoto (a.k.a. @mattn)
 
 - [Memo](https://github.com/mattn/memo) -
   Go application with internal Markdown server
+- [Notes](https://github.com/pimterry/notes)
 
 ## License
 
